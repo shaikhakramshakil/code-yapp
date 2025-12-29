@@ -1,0 +1,21 @@
+{
+  "name": "Code Yapp",
+  "short_name": "Code Yapp",
+  "description": "Private & Ephemeral Chat for Everyone.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#27272a",
+  "theme_color": "#27272a",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
