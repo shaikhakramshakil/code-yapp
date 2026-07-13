@@ -1,19 +1,15 @@
 
 import Redis from 'ioredis';
 
-const redisUrl = process.env.REDIS_URL;
-
-if (!redisUrl) {
-  throw new Error('REDIS_URL environment variable not set. Please configure your .env file.');
-}
-
 /**
  * Creates a new Redis client instance.
  * It's crucial that any client created with this function, especially for subscriptions,
  * is properly closed when it's no longer needed to avoid connection leaks.
  */
 function getRedisClient(): Redis {
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     const client = new Redis(redisUrl, {
+
         // Options for serverless environments
         lazyConnect: true,
         showFriendlyErrorStack: true,

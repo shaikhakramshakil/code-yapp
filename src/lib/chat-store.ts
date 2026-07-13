@@ -29,6 +29,12 @@ async function publishRoomUpdate(code: string, isDeletion = false) {
     }
 }
 
+export async function publishRoomEvent(code: string, payload: any) {
+    const redis = getRedisClient();
+    const channel = `${EVENTS_CHANNEL_PREFIX}${code}`;
+    await redis.publish(channel, JSON.stringify(payload));
+}
+
 function generateRoomCode(): string {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
@@ -141,13 +147,13 @@ export async function verifyPassword(code: string, password?: string): Promise<b
 export async function addMessage(code: string, message: Omit<Message, 'id' | 'timestamp'>): Promise<Message> {
     const redis = getRedisClient();
     const roomKey = getRoomKey(code);
-    const room = await getRoom(code);
+    const roomExists = await redis.exists(roomKey);
     
-    if (!room) {
+    if (!roomExists) {
         throw new Error('Room not found');
     }
     
-    const isUserKicked = room.kickedUsers?.includes(message.user.name);
+    const isUserKicked = await redis.sismember(`${roomKey}:kicked`, message.user.name);
 
     if (isUserKicked) {
         throw new Error('User is not authorized to send messages to this room.');
@@ -166,7 +172,7 @@ export async function addMessage(code: string, message: Omit<Message, 'id' | 'ti
     pipeline.hdel(`${roomKey}:typing`, message.user.name);
 
     await pipeline.exec();
-    await publishRoomUpdate(code);
+    await publishRoomEvent(code, { event: 'new_message', message: newMessage });
     return newMessage;
 }
 
@@ -179,7 +185,7 @@ export async function updateUserTypingStatus(roomCode: string, userName: string)
 
     const now = Date.now();
     await redis.hset(`${roomKey}:typing`, userName, now.toString());
-    await publishRoomUpdate(roomCode);
+    await publishRoomEvent(roomCode, { event: 'typing', userName, timestamp: now });
 }
 
 export async function joinRoom(roomCode: string, user: Omit<Room['users'][0], 'joinedAt'>) {
@@ -233,7 +239,11 @@ export async function updateMessageDetails(roomCode: string, messageId: string, 
     if (messageToUpdate && messageIndex !== -1) {
         const updatedMessage = { ...messageToUpdate, ...details };
         await redis.lset(messagesKey, messageIndex, JSON.stringify(updatedMessage));
-        await publishRoomUpdate(roomCode);
+        await publishRoomEvent(roomCode, {
+            event: 'message_updated',
+            messageId,
+            details
+        });
     }
 }
 

@@ -28,3 +28,11 @@ export interface Room {
   admin?: string;
   kickedUsers?: string[];
 }
+
+export type RoomEvent =
+  | { event: 'updated'; room: Room }
+  | { event: 'deleted' }
+  | { event: 'new_message'; message: Message }
+  | { event: 'message_updated'; messageId: string; details: { language?: string; explanation?: string } }
+  | { event: 'typing'; userName: string; timestamp: number };
+

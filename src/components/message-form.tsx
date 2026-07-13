@@ -101,11 +101,13 @@ export function MessageForm({
   userName,
   userAvatarUrl,
   room,
+  onOptimisticSend,
 }: {
   roomCode: string;
-  userName:string;
+  userName: string;
   userAvatarUrl: string;
   room: Room;
+  onOptimisticSend?: (text: string, fileData?: { name: string; type: string; url: string }) => void;
 }) {
   const [state, formAction] = useActionState(sendMessageAction, null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -121,6 +123,14 @@ export function MessageForm({
     formData.append('userName', userName);
     userTypingAction(formData);
   }, 500, { leading: true, trailing: false });
+
+  const handleAction = (formData: FormData) => {
+    const text = (formData.get('message') as string)?.trim() || '';
+    if (text || file) {
+      onOptimisticSend?.(text, file || undefined);
+    }
+    formAction(formData);
+  };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -185,7 +195,7 @@ export function MessageForm({
             </Button>
             <form
                 ref={formRef}
-                action={formAction}
+                action={handleAction}
                 className="flex-1 flex items-center gap-2"
                 onChange={debouncedTypingAction}
             >

@@ -1,12 +1,12 @@
 
 'use client';
 
-import type { Room } from '@/lib/types';
+import type { Room, RoomEvent } from '@/lib/types';
 import { useEffect, useState, useRef, useMemo, useTransition } from 'react';
 import { MessageView } from '@/components/message-view';
 import { MessageForm } from '@/components/message-form';
 import { Button } from '@/components/ui/button';
-import { Copy, Check, LogOut, Clock, MoreVertical, Trash2 } from 'lucide-react';
+import { Copy, Check, LogOut, Clock, MoreVertical, Trash2, Volume2, VolumeX, Wifi } from 'lucide-react';
 import {
   Popover,
   PopoverContent,
@@ -40,12 +40,25 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-type RoomEvent = {
-    event: 'updated',
-    room: Room,
-} | {
-    event: 'deleted'
+const playNotificationSound = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.12);
+  } catch (e) {
+    // Ignore audio context issues
+  }
 };
+
 
 
 const adjectives = [
@@ -130,10 +143,33 @@ export function ChatRoom({ initialRoom }: { initialRoom: Room }) {
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>('');
   const [hasJoined, setHasJoined] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const isMutedRef = useRef(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isMobile = useIsMobile();
   const { toast } = useToast();
   const router = useRouter();
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  const handleOptimisticSend = (messageText: string, fileData?: { name: string; type: string; url: string }) => {
+    const optimisticMessage = {
+      id: `optimistic-${Date.now()}-${Math.random().toString(36).substring(2)}`,
+      text: messageText,
+      user: { id: userName, name: userName, avatarUrl: userAvatarUrl },
+      timestamp: Date.now(),
+      fileUrl: fileData?.url,
+      fileName: fileData?.name,
+      fileType: fileData?.type,
+    };
+    setRoom(prev => ({
+      ...prev,
+      messages: [...prev.messages, optimisticMessage],
+    }));
+  };
   
   const lastMessageId = room.messages.length > 0 ? room.messages[room.messages.length - 1].id : null;
   const isAdmin = room.admin === userName;
@@ -167,7 +203,12 @@ export function ChatRoom({ initialRoom }: { initialRoom: Room }) {
 
     const eventSource = new EventSource(`/api/room/${initialRoom.code}/events`);
     
+    eventSource.onopen = () => {
+      setIsConnected(true);
+    };
+
     eventSource.onmessage = (event) => {
+        setIsConnected(true);
         const data = JSON.parse(event.data) as RoomEvent;
 
         if (data.event === 'deleted') {
@@ -176,8 +217,44 @@ export function ChatRoom({ initialRoom }: { initialRoom: Room }) {
                 description: "This room has been deleted by the admin."
             });
             eventSource.close();
-            // We use router.replace here to prevent the user from being able to go "back" to the deleted room.
             setTimeout(() => router.replace('/'), 2000);
+            return;
+        }
+
+        if (data.event === 'new_message') {
+            setRoom(prev => {
+                if (prev.messages.some(m => m.id === data.message.id)) {
+                    return prev;
+                }
+                const nonOptimistic = prev.messages.filter(
+                    m => !(m.id.startsWith('optimistic-') && m.user.name === data.message.user.name && m.text === data.message.text)
+                );
+                return {
+                    ...prev,
+                    messages: [...nonOptimistic, data.message]
+                };
+            });
+            if (data.message.user.name !== userName && !isMutedRef.current) {
+                playNotificationSound();
+            }
+            return;
+        }
+
+        if (data.event === 'message_updated') {
+            setRoom(prev => ({
+                ...prev,
+                messages: prev.messages.map(m =>
+                    m.id === data.messageId ? { ...m, ...data.details } : m
+                )
+            }));
+            return;
+        }
+
+        if (data.event === 'typing') {
+            setRoom(prev => ({
+                ...prev,
+                typing: { ...(prev.typing || {}), [data.userName]: data.timestamp }
+            }));
             return;
         }
 
@@ -201,10 +278,7 @@ export function ChatRoom({ initialRoom }: { initialRoom: Room }) {
     };
 
     eventSource.onerror = (err) => {
-        // This error handler is intentionally left blank.
-        // EventSource will automatically try to reconnect on errors.
-        // Logging these events can be noisy, especially during development with hot-reloading,
-        // as closing a connection is also considered an error.
+      setIsConnected(false);
     };
 
     return () => {
@@ -272,6 +346,20 @@ export function ChatRoom({ initialRoom }: { initialRoom: Room }) {
           </div>
         </div>
         <div className="flex items-center gap-2 md:gap-3">
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-secondary/40 border-border/40">
+              <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-amber-500 animate-pulse"}`} />
+              <span className="text-muted-foreground">{isConnected ? "Live" : "Connecting..."}</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-primary"
+              onClick={() => setIsMuted(m => !m)}
+              title={isMuted ? "Unmute sound notifications" : "Mute sound notifications"}
+            >
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </Button>
+
             {isMobile ? (
                 <Popover>
                     <PopoverTrigger asChild>
@@ -338,7 +426,13 @@ export function ChatRoom({ initialRoom }: { initialRoom: Room }) {
       <footer className="p-2 sm:p-4 bg-background md:border-t">
         <div className="max-w-4xl mx-auto w-full">
           {userName ? (
-            <MessageForm roomCode={room.code} userName={userName} userAvatarUrl={userAvatarUrl} room={room} />
+            <MessageForm
+              roomCode={room.code}
+              userName={userName}
+              userAvatarUrl={userAvatarUrl}
+              room={room}
+              onOptimisticSend={handleOptimisticSend}
+            />
           ) : (
             <p className="text-center text-muted-foreground">Joining room...</p>
           )}
